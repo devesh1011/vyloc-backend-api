@@ -98,7 +98,7 @@ Powered by **Gemini 3 Pro Image** for state-of-the-art image generation.
     # Configure CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=["*"],  # Allow all origins in development
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
