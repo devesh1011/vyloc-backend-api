@@ -160,50 +160,58 @@ def process_localization(
             "message": "Processing and uploading results...",
         })
         
-        # Post-process: remove watermarks and upload
-        final_images = []
-        total_languages = len(localized_images)
+        # Post-process: remove watermarks and upload IN PARALLEL
+        async def process_single_image(img, idx):
+            """Process a single image: remove watermark and upload."""
+            if img.status != LocalizationStatus.COMPLETED:
+                return img
+            
+            img_bytes = getattr(img, '_image_bytes', None)
+            if not img_bytes:
+                return img
+            
+            lang_name = img.language.value
+            
+            # Remove watermark if requested
+            if remove_watermark:
+                cleaned_bytes, error = await watermark_service.remove_watermark(img_bytes)
+                if cleaned_bytes:
+                    img_bytes = cleaned_bytes
+                    logger.info(f"🧹 Watermark removed for {lang_name}")
+            
+            # Upload to storage
+            if storage_service.is_available:
+                url, error = await storage_service.upload_localized_image(
+                    image_bytes=img_bytes,
+                    job_id=job_id,
+                    language=lang_name,
+                )
+                if url:
+                    img.image_url = url
+                    logger.info(f"✅ {lang_name} uploaded: {url}")
+            
+            # Clean up temporary bytes
+            if hasattr(img, '_image_bytes'):
+                delattr(img, '_image_bytes')
+            
+            return img
         
-        for idx, img in enumerate(localized_images):
-            progress = 60 + int((idx / total_languages) * 30)
-            
-            if img.status == LocalizationStatus.COMPLETED:
-                img_bytes = getattr(img, '_image_bytes', None)
-                
-                if img_bytes:
-                    lang_name = img.language.value
-                    
-                    # Update progress for this language
-                    update_job_status(job_id, {
-                        "job_id": job_id,
-                        "status": "processing",
-                        "progress": progress,
-                        "message": f"Processing {lang_name}...",
-                    })
-                    
-                    # Remove watermark if requested
-                    if remove_watermark:
-                        cleaned_bytes, error = run_async(watermark_service.remove_watermark(img_bytes))
-                        if cleaned_bytes:
-                            img_bytes = cleaned_bytes
-                            logger.info(f"🧹 Watermark removed for {lang_name}")
-                    
-                    # Upload to storage
-                    if storage_service.is_available:
-                        url, error = run_async(storage_service.upload_localized_image(
-                            image_bytes=img_bytes,
-                            job_id=job_id,
-                            language=lang_name,
-                        ))
-                        if url:
-                            img.image_url = url
-                            logger.info(f"✅ {lang_name} uploaded: {url}")
-                    
-                    # Clean up temporary bytes
-                    if hasattr(img, '_image_bytes'):
-                        delattr(img, '_image_bytes')
-            
-            final_images.append(img)
+        # Run all post-processing in parallel
+        async def process_all_images():
+            tasks = [process_single_image(img, idx) for idx, img in enumerate(localized_images)]
+            return await asyncio.gather(*tasks, return_exceptions=True)
+        
+        processed_results = run_async(process_all_images())
+        
+        # Handle results
+        final_images = []
+        for result in processed_results:
+            if isinstance(result, Exception):
+                logger.error(f"Post-processing error: {result}")
+                # Keep original image with failed status
+                final_images.append(localized_images[len(final_images)])
+            else:
+                final_images.append(result)
         
         # Calculate stats
         total_time_ms = int((time.time() - start_time) * 1000)
