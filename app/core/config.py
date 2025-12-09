@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
     
     # CORS Configuration - stored as comma-separated string
-    cors_origins_str: str = "http://localhost:3000,http://localhost:8000"
+    cors_origins_str: str = "http://localhost:3000,http://localhost:8000,https://adaptly-five.vercel.app,https://*.ngrok-free.app"
     
     # Google AI Configuration
     google_api_key: str = ""
