@@ -1,3 +1,4 @@
+
 set -e
 
 # Default to running the API server
